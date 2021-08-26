@@ -185,7 +185,8 @@ def retrigger_action(parameters, graph_config, input, task_group_id, task_id):
 @register_callback_action(
     title="Rerun",
     name="rerun",
-    generic=True,
+    generic=False,
+    cb_name="rerun",
     symbol="rr",
     description=(
         "Rerun a task.\n\n"
@@ -195,6 +196,7 @@ def retrigger_action(parameters, graph_config, input, task_group_id, task_id):
     order=300,
     context=[{}],
     schema={"type": "object", "properties": {}},
+    scope_repo="base",
 )
 def rerun_action(parameters, graph_config, input, task_group_id, task_id):
     task = taskcluster.get_task_definition(task_id)

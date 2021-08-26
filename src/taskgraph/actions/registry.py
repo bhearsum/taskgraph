@@ -19,7 +19,7 @@ from taskgraph.util.memoize import memoize
 actions = []
 callbacks = {}
 
-Action = namedtuple("Action", ["order", "cb_name", "generic", "action_builder"])
+Action = namedtuple("Action", ["order", "cb_name", "generic", "action_builder", "scope_repo"])
 
 
 def is_json(data):
@@ -58,6 +58,7 @@ def register_callback_action(
     schema=None,
     generic=True,
     cb_name=None,
+    scope_repo="head",
 ):
     """
     Register an action callback that can be triggered from supporting
@@ -168,9 +169,9 @@ def register_callback_action(
             actionPerm = "generic" if generic else cb_name
 
             # gather up the common decision-task-supplied data for this action
-            repo_param = "head_repository"
+            # needs to check base for reruns
             repository = {
-                "url": parameters[repo_param],
+                "url": parameters["head_repository"],
                 "project": parameters["project"],
                 "level": parameters["level"],
             }
@@ -231,6 +232,7 @@ def register_callback_action(
                             "action": action,
                             "repository": repository,
                             "push": push,
+                            "scope_repository": parameters.get("{}_repository".format(scope_repo)),
                         },
                         # and pass everything else through from our own context
                         "user": {
@@ -249,7 +251,7 @@ def register_callback_action(
 
             return rv
 
-        actions.append(Action(order, cb_name, generic, action_builder))
+        actions.append(Action(order, cb_name, generic, action_builder, scope_repo))
 
         mem["registered"] = True
         callbacks[cb_name] = cb
@@ -293,22 +295,27 @@ def sanity_check_task_scope(callback, parameters, graph_config):
     running non-generic actions using generic hooks. While scopes should
     prevent serious damage from such abuse, it's never a valid thing to do.
     """
+    scope_repo = None
     for action in _get_actions(graph_config):
         if action.cb_name == callback:
+            scope_repo = action.scope_repo
             break
     else:
         raise Exception(f"No action with cb_name {callback}")
 
     actionPerm = "generic" if action.generic else action.cb_name
 
-    repo_param = "head_repository"
-    head_repository = parameters[repo_param]
-    if not head_repository.startswith(("https://hg.mozilla.org", "https://github.com")):
+    if scope_repo == "base":
+        repo_param = "base_repository"
+    else:
+        repo_param = "head_repository"
+    repository = parameters[repo_param]
+    if not repository.startswith(("https://hg.mozilla.org", "https://github.com")):
         raise Exception(
             "{} is not either https://hg.mozilla.org or https://github.com !"
         )
 
-    expected_scope = f"assume:repo:{head_repository[8:]}:action:{actionPerm}"
+    expected_scope = f"assume:repo:{repository[8:]}:action:{actionPerm}"
 
     # the scope should appear literally; no need for a satisfaction check. The use of
     # get_current_scopes here calls the auth service through the Taskcluster Proxy, giving
