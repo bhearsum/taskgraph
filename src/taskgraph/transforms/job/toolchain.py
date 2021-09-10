@@ -94,6 +94,11 @@ def docker_worker_toolchain(config, job, taskdesc):
     worker = taskdesc["worker"] = job["worker"]
     worker["chain-of-trust"] = True
 
+    if worker["os"] == "windows":
+        srcdir = "src"
+    else:
+        srcdir = "vcs"
+
     # If the task doesn't have a docker-image, set a default
     worker.setdefault("docker-image", {"in-tree": "toolchain-build"})
 
@@ -127,7 +132,7 @@ def docker_worker_toolchain(config, job, taskdesc):
     run["using"] = "run-task"
     run["cwd"] = "{checkout}/.."
     run["command"] = [
-        "src/taskcluster/scripts/toolchain/{}".format(run.pop("script"))
+        "{}/taskcluster/scripts/toolchain/{}".format(srcdir, run.pop("script"))
     ] + run.pop("arguments", [])
 
     configure_taskdesc_for_run(config, job, taskdesc, worker["implementation"])
