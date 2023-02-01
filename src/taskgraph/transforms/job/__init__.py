@@ -18,7 +18,8 @@ from voluptuous import Any, Exclusive, Extra, Optional, Required
 
 from taskgraph.transforms.base import TransformSequence
 from taskgraph.transforms.cached_tasks import order_tasks
-from taskgraph.transforms.task import task_description_schema
+from taskgraph.transforms.fetch import FETCH_SCHEMA, transforms as fetch_transforms
+from taskgraph.transforms.task import task_description_schema, transforms as task_transforms
 from taskgraph.util import path as mozpath
 from taskgraph.util.python_path import import_sibling_modules
 from taskgraph.util.schema import Schema, validate_schema
@@ -83,6 +84,7 @@ job_description_schema = Schema(
                     Optional("verify-hash"): bool,
                 },
             ],
+            "win-rustup": FETCH_SCHEMA,
         },
         # A description of how to run this job.
         "run": {
@@ -196,6 +198,8 @@ def get_attribute(dict, key, attributes, attribute_name):
     if value:
         dict[key] = value
 
+fetch_only_job_transforms = TransformSequence()
+fetch_only_job_transforms._transforms.extend(transforms._transforms)
 
 @transforms.add
 def use_fetches(config, jobs):
@@ -242,6 +246,31 @@ def use_fetches(config, jobs):
         env = worker.setdefault("env", {})
         prefix = get_artifact_prefix(job)
         for kind, artifacts in fetches.items():
+            # 1) Detect an embedded fetch definition
+            if kind == "win-rustup":
+                # 2) If found, generate that task and yield it (using fetch transform)
+                # this is only hitting the fetch transforms - so the task ends up invalid...
+                # how do we know which set of transforms it truly needs? it sholud be fetch + job + task. can we hardcode that somewhere ?
+                # we can't assume that the task it comes from has the correct set
+                needed_transforms = TransformSequence()
+                needed_transforms._transforms.extend(fetch_transforms._transforms)
+                # job transforms
+                needed_transforms._transforms.extend(fetch_only_job_transforms._transforms)
+                #needed_transforms._transforms.extend(task_transforms._transforms)
+                # TODO: need to make sure we never generate these more than once
+                # TODO: this actually works (!) but some metadata is wrong:
+                # - `kind` is `build` instead of `fetch` in various places
+                # - attributes.cached_task.name is `fetch-win-rustup` instead of `win-rustup`
+                yield from needed_transforms(config, [artifacts])
+                # 3) add the fetch as a dependency?
+                # 4) Transform the entry into a regular fetch reference and continue
+                kind = "fetch"
+                artifacts = ["win-rustup"]
+                # TODO: pull this from something before yielded above
+                artifact_names["fetch-win-rustup"] = "public/rustup-init.exe"
+
+
+
             if kind in ("fetch", "toolchain"):
                 for fetch_name in artifacts:
                     label = f"{kind}-{fetch_name}"
