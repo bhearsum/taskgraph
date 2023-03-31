@@ -116,7 +116,7 @@ def make_task(config, jobs):
         env = job.get("env", {})
         env.update({"UPLOAD_DIR": "/builds/worker/artifacts"})
         attributes = job.get("attributes", {})
-        attributes["fetch-artifact"] = path.join(artifact_prefix, job["artifact_name"])
+        attributes["fetch-artifacts"] = [path.join(artifact_prefix, a) for a in job["artifact_names"]]
         alias = job.get("fetch-alias")
         if alias:
             attributes["fetch-alias"] = alias
@@ -202,6 +202,7 @@ def make_task(config, jobs):
         # Strip the given number of path components at the beginning of
         # each file entry in the archive.
         # Requires an artifact-name ending with .tar.zst.
+        Optional("artifacts"): {str: [str]},
         Optional("strip-components"): int,
         # Add the given prefix to each file entry in the archive.
         # Requires an artifact-name ending with .tar.zst.
@@ -216,7 +217,9 @@ def make_task(config, jobs):
 )
 def create_fetch_url_task(config, name, fetch):
     artifact_name = fetch.get("artifact-name")
-    if not artifact_name:
+    artifacts = fetch.pop("artifacts", [])
+    artifact_names = []
+    if not artifact_name and not artifacts:
         artifact_name = fetch["url"].split("/")[-1]
 
     command = [
@@ -263,21 +266,27 @@ def create_fetch_url_task(config, name, fetch):
         for k, v in fetch["headers"].items():
             command.extend(["-H", f"{k}:{v}"])
 
-    command.extend(
-        [
-            fetch["url"],
-            "/builds/worker/artifacts/%s" % artifact_name,
-        ]
-    )
+    command.append(fetch["url"])
+    if artifact_name:
+        command.append(f"/builds/worker/artifacts/{artifact_name}")
+        artifact_names.append(artifact_name)
+    else:
+        for artifact_name, patterns in artifacts.items():
+            artifact_names.append(artifact_name)
+            patterns_arg = " ".join(patterns)
+            command.extend([
+                f"/builds/worker/artifacts/{artifact_name}",
+                patterns_arg
+            ])
 
     return {
         "command": command,
-        "artifact_name": artifact_name,
+        "artifact_names": artifact_names,
         "env": env,
         # We don't include the GPG signature in the digest because it isn't
         # materially important for caching: GPG signatures are supplemental
         # trust checking beyond what the shasum already provides.
-        "digest_data": args + [artifact_name],
+        "digest_data": args + artifact_names,
     }
 
 
@@ -329,7 +338,7 @@ def create_git_fetch_task(config, name, fetch):
 
     return {
         "command": args,
-        "artifact_name": artifact_name,
+        "artifact_names": [artifact_name],
         "digest_data": digest_data,
         "secret": ssh_key,
     }

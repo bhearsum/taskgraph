@@ -215,6 +215,11 @@ def use_fetches(config, jobs):
 
     for task in config.kind_dependencies_tasks.values():
         if task.kind in ("fetch", "toolchain"):
+            all_artifacts = task.attributes.get(f"{task.kind}-artifacts", [])
+            for a in all_artifacts:
+                artifact_names[f"{task.label}/{a}"] = a
+            if len(all_artifacts) == 1:
+                artifact_names[task.label] = all_artifacts[0]
             get_attribute(
                 artifact_names,
                 task.label,

@@ -400,7 +400,8 @@ def extract_archive(path, dest_dir, typ):
 
 
 def repack_archive(
-    orig: pathlib.Path, dest: pathlib.Path, strip_components=0, prefix=""
+    orig: pathlib.Path, dest: pathlib.Path, strip_components=0, prefix="",
+    file_patterns = [],
 ):
     assert orig != dest
     log("Repacking as %s" % dest)
@@ -414,7 +415,7 @@ def repack_archive(
     if dest.suffixes[-2:] != [".tar", ".zst"]:
         raise Exception("Only producing .tar.zst archives is supported.")
 
-    if strip_components or prefix:
+    if strip_components or prefix or file_patterns:
 
         def filter(name):
             if strip_components:
@@ -424,6 +425,14 @@ def repack_archive(
                         "Stripping %d components would remove files" % strip_components
                     )
                 name = stripped
+
+            # We don't process file patterns to keep until after stripping
+            # to make sure that, eg: version changes in leading directories
+            # that we don't care about don't break them.
+            for p in file_patterns:
+                if not name.startswith(p):
+                    return None
+
             return prefix + name
 
     else:
@@ -443,7 +452,11 @@ def repack_archive(
                         continue
                     tarinfo = tarfile.TarInfo()
                     filename = zipinfo.filename
-                    tarinfo.name = filter(filename) if filter else filename
+                    filename = filter(filename) if filter else filename
+                    if not filename:
+                        # Rejected by file patterns
+                        continue
+                    tarinfo.name = filename
                     tarinfo.size = zipinfo.file_size
                     # Zip files don't have any knowledge of the timezone
                     # they were created in. Which is not really convenient to
@@ -488,7 +501,11 @@ def repack_archive(
                     for tarinfo in origtar:
                         if tarinfo.isdir():
                             continue
-                        tarinfo.name = filter(tarinfo.name)
+                        filename = filter(tarinfo.name) if filter else tarinfo.name
+                        if not filename:
+                            # Rejected by file patterns
+                            continue
+                        tarinfo.name = filename
                         if "path" in tarinfo.pax_headers:
                             tarinfo.pax_headers["path"] = filter(
                                 tarinfo.pax_headers["path"]
@@ -722,14 +739,18 @@ def command_static_url(args):
         gpg_signature = b"".join(stream_download(gpg_sig_url))
         gpg_key = os.environb[gpg_env_key.encode("ascii")]
 
-    dest = pathlib.Path(args.dest)
-    dest.parent.mkdir(parents=True, exist_ok=True)
+    dests = {}
+    if len(args.artifacts) == 1:
+        dests[args.artifacts[0]] = []
+    else:
+        if len(args.artifacts) % 2 != 0:
+            raise Exception("Bad number of args")
+        for dest, pattern in zip(*[iter(args.artifacts)]*2):
+            dests[dest] = [pattern]
 
     basename = urllib.parse.urlparse(args.url).path.split("/")[-1]
-    if basename.endswith("".join(dest.suffixes)):
-        dl_dest = dest
-    else:
-        dl_dest = dest.parent / basename
+    tmpd = pathlib.Path(tempfile.mkdtemp())
+    dl_dest = tmpd / basename
 
     try:
         download_to_path(
@@ -739,8 +760,18 @@ def command_static_url(args):
         if gpg_sig_url:
             gpg_verify_path(dl_dest, gpg_key, gpg_signature)
 
-        if dl_dest != dest or args.strip_components or args.add_prefix:
-            repack_archive(dl_dest, dest, args.strip_components, args.add_prefix)
+        for d, file_patterns in dests.items():
+            dest = pathlib.Path(d)
+            dest.parent.mkdir(parents=True, exist_ok=True)
+
+            # If we want to re-use the exact original file...
+            if dl_dest.name.endswith("".join(dest.suffixes)) and not file_patterns and not args.strip_components and not args.add_prefix:
+                # ...just move it into place
+                dl_dest.rename(dest)
+            else:
+                # ...otherwise, we need to repack it
+                repack_archive(dl_dest, dest, args.strip_components, args.add_prefix, file_patterns)
+
     except Exception:
         try:
             dl_dest.unlink()
@@ -749,7 +780,7 @@ def command_static_url(args):
 
         raise
 
-    if dl_dest != dest:
+    if dl_dest != dest and dl_dest.exists():
         log("Removing %s" % dl_dest)
         dl_dest.unlink()
 
@@ -872,7 +903,7 @@ def main():
         help="Header to send as part of the request, can be passed " "multiple times",
     )
     url.add_argument("url", help="URL to fetch")
-    url.add_argument("dest", help="Destination path")
+    url.add_argument("artifacts", nargs="*")
 
     artifacts = subparsers.add_parser("task-artifacts", help="Fetch task artifacts")
     artifacts.set_defaults(func=command_task_artifacts)
@@ -886,11 +917,11 @@ def main():
 
     args = parser.parse_args()
 
-    if not args.dest:
-        parser.error(
-            "no destination directory specified, either pass in --dest "
-            "or set $MOZ_FETCHES_DIR"
-        )
+    #if not args.dest:
+    #    parser.error(
+    #        "no destination directory specified, either pass in --dest "
+    #        "or set $MOZ_FETCHES_DIR"
+    #    )
 
     return args.func(args)
 
