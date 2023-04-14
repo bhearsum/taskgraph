@@ -48,6 +48,7 @@ FETCH_SCHEMA = Schema(
             Required("type"): str,
             Extra: object,
         },
+        Optional("treeherder"): object,
     }
 )
 
@@ -149,7 +150,7 @@ def make_task(config, jobs):
             },
         }
 
-        if "treeherder" in config.graph_config:
+        if "treeherder" in config.graph_config and "treeherder" not in task:
             task["treeherder"] = {
                 "symbol": join_symbol("Fetch", name),
                 "kind": "build",
