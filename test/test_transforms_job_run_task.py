@@ -6,8 +6,11 @@ from pprint import pprint
 
 import pytest
 
+from taskgraph.transforms.base import TransformConfig
 from taskgraph.transforms.job import make_task_description
 from taskgraph.util.templates import merge
+
+from .conftest import FakeParameters
 
 here = os.path.abspath(os.path.dirname(__file__))
 
@@ -22,25 +25,83 @@ TASK_DEFAULTS = {
     },
     "run": {
         "using": "run-task",
-        "command": "echo hello {extra_string}",
+        # TODO: add some more variables to test precedence
+        # direct only
+        # file only
+        # param only
+        # direct + file
+        # direct + param
+        # file + param
+        # direct + file + param
+        # param fallback
+        "command": "echo hello {direct} {file} {param} {direct_and_file} "
+                   "{direct_and_param} {file_and_param} {direct_file_and_param} "
+                   "{param_fallback}",
         "command-context": {
+            "direct": "direct",
+            "direct_and_file": "direct-overrides-file",
+            "direct_and_param": "direct-overrides-param",
+            "direct_file_and_param": "direct-overrides-all",
             "from-file": f"{here}/data/command_context.yaml",
+            "from-parameters": {
+                "param": "param",
+                "direct_and_param": "direct_and_param",
+                "file_and_param": "file_and_param",
+                "direct_file_and_param": "direct_file_and_param",
+                "param_fallback": ["missing-param", "default"],
+            },
         },
     },
 }
 
 
 @pytest.fixture
-def run_job_using(mocker, run_transform):
+def run_job_using(mocker, run_transform, graph_config):
     m = mocker.patch("taskgraph.util.hash._get_all_files")
     m.return_value = [
         "taskcluster/scripts/toolchain/run.sh",
         "taskcluster/scripts/toolchain/run.ps1",
     ]
 
+    params = FakeParameters(
+        {
+            "param": "param",
+            "direct_and_param": "ignored",
+            "file_and_param": "param-overrides-file",
+            "direct_file_and_param": "ignored",
+            "default": "default",
+            "base_repository": "http://hg.example.com",
+            "build_date": 0,
+            "build_number": 1,
+            "enable_always_target": True,
+            "head_repository": "http://hg.example.com",
+            "head_rev": "abcdef",
+            "head_ref": "default",
+            "level": "1",
+            "moz_build_date": 0,
+            "next_version": "1.0.1",
+            "owner": "some-owner",
+            "project": "some-project",
+            "pushlog_id": 1,
+            "repository_type": "hg",
+            "target_tasks_method": "test_method",
+            "tasks_for": "hg-push",
+            "try_mode": None,
+            "version": "1.0.0",
+        },
+    )
+    transform_config = TransformConfig(
+        "test",
+        str(here),
+        {},
+        params,
+        {},
+        graph_config,
+        write_artifacts=False
+    )
     def inner(task):
         task = merge(TASK_DEFAULTS, task)
-        return run_transform(make_task_description, task)[0]
+        return run_transform(make_task_description, task, config=transform_config)[0]
 
     return inner
 
@@ -70,7 +131,9 @@ def assert_docker_worker(task):
                 "--",
                 "bash",
                 "-cx",
-                "echo hello world",
+                "echo hello direct file param direct-overrides-file "
+                "direct-overrides-param param-overrides-file "
+                "direct-overrides-all default",
             ],
             "env": {
                 "CI_BASE_REPOSITORY": "http://hg.example.com",
@@ -105,7 +168,9 @@ def assert_generic_worker(task):
             "command": [
                 "C:/mozilla-build/python3/python3.exe run-task "
                 '--ci-checkout=./build/src/ -- bash -cx "echo hello '
-                'world"'
+                'direct file param direct-overrides-file '
+                'direct-overrides-param param-overrides-file '
+                'direct-overrides-all default"',
             ],
             "env": {
                 "CI_BASE_REPOSITORY": "http://hg.example.com",
@@ -142,7 +207,9 @@ def assert_exec_with(task):
         "powershell.exe",
         "-ExecutionPolicy",
         "Bypass",
-        "echo hello world",
+        "echo hello direct file param direct-overrides-file "
+        "direct-overrides-param param-overrides-file "
+        "direct-overrides-all default",
     ]
 
 
@@ -154,7 +221,9 @@ def assert_run_task_command_docker_worker(task):
         "--",
         "bash",
         "-cx",
-        "echo hello world",
+        "echo hello direct file param direct-overrides-file "
+        "direct-overrides-param param-overrides-file "
+        "direct-overrides-all default",
     ]
 
 
@@ -168,7 +237,9 @@ def assert_run_task_command_generic_worker(task):
             "--",
             "bash",
             "-cx",
-            "echo hello world",
+            "echo hello direct file param direct-overrides-file "
+            "direct-overrides-param param-overrides-file "
+            "direct-overrides-all default",
         ],
     ]
 

@@ -1,1 +1,4 @@
-extra_string: "world"
+file: file
+direct_and_file: ignored
+file_and_param: ignored
+direct_file_and_param: ignored

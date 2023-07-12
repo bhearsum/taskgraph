@@ -5,6 +5,7 @@
 Support for running jobs that are invoked via the `run-task` script.
 """
 
+import copy
 import dataclasses
 import os
 
@@ -14,6 +15,7 @@ from taskgraph.transforms.job import run_job_using
 from taskgraph.transforms.job.common import support_vcs_checkout
 from taskgraph.transforms.task import taskref_or_string
 from taskgraph.util import path, taskcluster
+from taskgraph.util.dict_helpers import deep_get
 from taskgraph.util.schema import Schema
 from taskgraph.util.yaml import load_yaml
 
@@ -49,10 +51,18 @@ run_task_schema = Schema(
         # Context to substitute into the command using format string
         # substitution (e.g {value}). This is useful if certain aspects of the
         # command need to be generated in transforms.
+        # In order of precedence, we support pulling command context from the
+        # following places:
+        # * Keys and values in the `command-context` object
+        # * Parameters
+        # * A specified file
         Optional("command-context"): {
-            # If present, loads a set of context variables from an unnested yaml
-            # file. If a value is present in both the provided file and directly
-            # in command-context, the latter will take priority.
+            Optional("from-parameters"): {
+                # Command context may be pulled from one specific key, or an
+                # ordered list of places to look for the value may be specified,
+                # with the first one winning.
+                str: Any([str], str),
+            },
             Optional("from-file"): str,
             Extra: object,
         },
@@ -137,14 +147,26 @@ def script_url(config, script):
     return f"{tc_url}/api/queue/v1/task/{task_id}/artifacts/public/{script}"
 
 
-def substitute_command_context(command_context, command):
-    from_file = command_context.pop("from-file", None)
-    full_context = {}
-    if from_file:
-        full_context = load_yaml(from_file)
-    else:
-        full_context = {}
+def substitute_command_context(command_context, command, params):
+    from_params = command_context.pop("from-parameters", {})
+    param_context = {}
+    for param, path in from_params.items():
+        if isinstance(path, str):
+            param_context[param] = deep_get(params, path)
+        else:
+            for choice in path:
+                value = deep_get(params, choice)
+                if value is not None:
+                    param_context[param] = value
 
+    from_file = command_context.pop("from-file", None)
+    file_context = {}
+    if from_file:
+        file_context = load_yaml(from_file)
+
+    # command context > params > file, so apply these in reverse order
+    full_context = copy.deepcopy(file_context)
+    full_context.update(param_context)
     full_context.update(command_context)
 
     if isinstance(command, list):
@@ -179,7 +201,7 @@ def docker_worker_run_task(config, job, taskdesc):
 
     if run.get("command-context"):
         run_command = substitute_command_context(
-            run.get("command-context"), run["command"]
+            run.get("command-context"), run["command"], config.params
         )
     else:
         run_command = run["command"]
@@ -252,7 +274,7 @@ def generic_worker_run_task(config, job, taskdesc):
 
     if run.get("command-context"):
         run_command = substitute_command_context(
-            run.get("command-context"), run_command
+            run.get("command-context"), run_command, config.params,
         )
 
     if run["run-as-root"]:
