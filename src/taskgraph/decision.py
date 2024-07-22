@@ -286,6 +286,8 @@ def _determine_more_accurate_base_ref(repo, candidate_base_ref, head_ref, base_r
     base_ref = candidate_base_ref
 
     if not candidate_base_ref:
+        # It's easy to toss this usage of default_branch away by simply 
+        # requiring `base_ref` to always be passed for decision tasks
         base_ref = repo.default_branch
     elif candidate_base_ref == head_ref and base_rev == Repository.NULL_REVISION:
         logger.info(

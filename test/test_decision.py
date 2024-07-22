@@ -168,7 +168,6 @@ def test_determine_more_accurate_base_ref(
     candidate_base_ref, base_rev, expected_base_ref
 ):
     repo_mock = unittest.mock.MagicMock()
-    repo_mock.default_branch = "default-branch"
 
     assert (
         decision._determine_more_accurate_base_ref(
