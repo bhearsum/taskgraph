@@ -107,6 +107,7 @@ FROM_DEPS_SCHEMA = Schema(
                 """.lstrip()
                 ),
             ): {str: [fetches_schema]},
+            Optional("if-dependencies"): bool,
         },
         Extra: object,
     },
@@ -189,9 +190,10 @@ def from_deps(config, tasks):
 
             new_task = deepcopy(task)
             new_task.setdefault("dependencies", {})
-            new_task["dependencies"].update(
-                {dep.kind if unique_kinds else dep.label: dep.label for dep in group}
-            )
+            added_deps = {dep.kind if unique_kinds else dep.label: dep.label for dep in group}
+            new_task["dependencies"].update(added_deps)
+            if from_deps.get("if-dependencies", False):
+                new_task["if-dependencies"] = list(added_deps.keys())
 
             # Set name and copy attributes from the primary kind.
             for kind in kinds:
