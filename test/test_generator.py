@@ -3,7 +3,7 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 from pytest_taskgraph import WithFakeKind, fake_load_graph_config
@@ -13,7 +13,7 @@ from taskgraph.generator import Kind, load_tasks_for_kind, load_tasks_for_kinds
 from taskgraph.loader.default import loader as default_loader
 
 
-class FakePPE(ProcessPoolExecutor):
+class FakeTPE(ThreadPoolExecutor):
     loaded_kinds = []
 
     def submit(self, kind_load_tasks, *args):
@@ -23,7 +23,7 @@ class FakePPE(ProcessPoolExecutor):
 
 def test_kind_ordering(mocker, maketgg):
     "When task kinds depend on each other, they are loaded in postorder"
-    mocked_ppe = mocker.patch.object(generator, "ProcessPoolExecutor", new=FakePPE)
+    mocked_tpe = mocker.patch.object(generator, "ThreadPoolExecutor", new=FakeTPE)
     tgg = maketgg(
         kinds=[
             ("_fake3", {"kind-dependencies": ["_fake2", "_fake1"]}),
@@ -32,7 +32,7 @@ def test_kind_ordering(mocker, maketgg):
         ]
     )
     tgg._run_until("full_task_set")
-    assert mocked_ppe.loaded_kinds == ["_fake1", "_fake2", "_fake3"]
+    assert mocked_tpe.loaded_kinds == ["_fake1", "_fake2", "_fake3"]
 
 
 def test_full_task_set(maketgg):
