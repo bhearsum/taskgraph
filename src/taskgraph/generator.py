@@ -10,6 +10,7 @@ import os
 from concurrent.futures import (
     FIRST_COMPLETED,
     ProcessPoolExecutor,
+    ThreadPoolExecutor,
     wait,
 )
 from dataclasses import dataclass
@@ -317,9 +318,22 @@ class TaskGraphGenerator:
         futures = set()
         edges = set(kind_graph.edges)
 
-        with ProcessPoolExecutor(
-            mp_context=multiprocessing.get_context("fork")
-        ) as executor:
+        # use processes if available; this allows us to use multiple CPU cores
+        # we should revisit this default when free-threaded python is more
+        # stable and performant. in the meantime, allowing the usage of threads
+        # can still be helpful when `fork` multiprocessing is not available
+        # (like windows and mac), and gives users the option to try using
+        # free threaded python to speed things up
+        if "fork" in multiprocessing.get_all_start_methods() and not os.environ.get(
+            "TASKGRAPH_USE_THREADS"
+        ):
+            executor = ProcessPoolExecutor(
+                mp_context=multiprocessing.get_context("fork")
+            )
+        else:
+            executor = ThreadPoolExecutor(max_workers=os.process_cpu_count())
+
+        with executor:
 
             def submit_ready_kinds():
                 """Create the next batch of tasks for kinds without dependencies."""
@@ -433,13 +447,6 @@ class TaskGraphGenerator:
         yield "kind_graph", kind_graph
 
         logger.info("Generating full task set")
-        # Current parallel generation relies on multiprocessing, and forking.
-        # This causes problems on Windows and macOS due to how new processes
-        # are created there, and how doing so reinitializes global variables
-        # that are modified earlier in graph generation, that doesn't get
-        # redone in the new processes. Ideally this would be fixed, or we
-        # would take another approach to parallel kind generation. In the
-        # meantime, it's not supported outside of Linux.
         if "fork" not in multiprocessing.get_all_start_methods() or os.environ.get(
             "TASKGRAPH_SERIAL"
         ):
