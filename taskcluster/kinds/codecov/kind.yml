@@ -20,6 +20,8 @@ tasks:
             kinds: [test]
             group-by: all
             unique-kinds: false
+            with-attributes:
+                platform: linux
             set-name: null
             fetches:
                 test:
