@@ -220,3 +220,36 @@ def test_resolve_keyed_by_missing_context_with_defer(run_transform, graph_config
             "default": "also-should-not-resolve",
         },
     }
+
+
+def test_resolve_keyed_by_custom_context(run_transform, graph_config):
+    from taskgraph.util.task_context import CUSTOM_CONTEXT_MAP, custom_context
+
+    try:
+        @custom_context("colour")
+        def _colour(config, task):
+            return {"colour": "blue"}
+
+        task = {
+            "name": "fake-task-name",
+            "description": {
+                "by-colour": {
+                    "blue": "i am a blue task!",
+                    "default": " i am a default task",
+                },
+            },
+            "task-context": {
+                "from-custom": ["colour"],
+                "substitution-fields": ["description"],
+            },
+        }
+        config = make_config(graph_config)
+
+        task = run_transform(task_context.transforms, task, config=config)[0]
+        pprint(task, indent=2)
+
+        assert task["description"] == "i am a blue task!"
+    finally:
+        # ensure `CUSTOM_CONTEXT_MAP` is reset at the end of the test
+        # regardless of result
+        CUSTOM_CONTEXT_MAP.pop("colour", None)
